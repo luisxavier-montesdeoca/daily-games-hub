@@ -9,25 +9,41 @@ import type { Parser } from './types';
  * 🎯💥🎯💥💥 → quedan 7
  * 301juegodiario.com
  *
+ * A perfect game (exactly 0 left) says "→ ¡DIANA!" (or "→ BULLSEYE!" in English) instead of a number.
+ *
  * Value = points left (lower is better). The category goes in the note.
  */
-const H301 = /^\s*301\s*[·•-]\s*D[ií]a\s*#\s*(\d+)/im;
+const H301 = /^\s*301\s*[·•-]\s*(?:D[ií]a|Day)\s*#\s*(\d+)/im;
+const BULLSEYE = /¡?\s*(?:diana|bullseye)\s*!?/i;
+// "quedan 7" / "queda 7" / "7 left" / "left: 7"
+const LEFT = /(?:quedan?|left:?)\s+([\d.,]+)|([\d.,]+)\s+left\b/i;
+/** The darts line: the one with "→" first, so a category like "Palabras con diana" isn't mistaken for it. */
+function findResultLine(rest: string[]): string {
+  return (
+    rest.find((l) => /→|->/.test(l)) ??
+    rest.find((l) => LEFT.test(l)) ??
+    rest.find((l) => new RegExp(`^\\s*${BULLSEYE.source}\\s*$`, 'i').test(l)) ??
+    ''
+  );
+}
 
 export const game301: Parser = {
   gameId: '301',
   detect: (text) => H301.test(text),
   parse: (text) => {
     const m = text.match(H301);
-    const left = text.match(/quedan?\s+([\d.,]+)/i);
-    if (!m || !left) return null;
+    if (!m) return null;
     const all = lines(text);
-    const dartLine = all.find((l) => /quedan?/i.test(l)) ?? '';
-    const darts = emojiRows(dartLine.split(/→|->|quedan?/i)[0]);
-    const category = all.slice(1).find((l) => l !== dartLine && !/301juegodiario/i.test(l));
+    const resultLine = findResultLine(all.slice(1));
+    const left = resultLine.match(LEFT);
+    const value = left ? parseNumber(left[1] ?? left[2]) : BULLSEYE.test(resultLine) ? 0 : undefined;
+    if (value === undefined) return null;
+    const darts = emojiRows(resultLine.split(/→|->/)[0]);
+    const category = all.slice(1).find((l) => l !== resultLine && !/301juegodiario/i.test(l));
     return {
       puzzleNumber: Number(m[1]),
       outcome: 'n/a',
-      value: parseNumber(left[1]),
+      value,
       grid: darts[0],
       note: category,
     };

@@ -112,6 +112,27 @@ describe('real share texts', () => {
     });
   });
 
+  it('301: a perfect game says ¡DIANA! / BULLSEYE! instead of a number → 0', () => {
+    const diana = G301.replace('→ quedan 7', '→ ¡DIANA!');
+    expect(detectGame(diana)?.parsed).toEqual({
+      puzzleNumber: 33,
+      outcome: 'n/a',
+      value: 0,
+      grid: '🎯💥🎯💥💥',
+      note: 'Ranking de los países por tasa de fertilidad (hijos por mujer)',
+    });
+    expect(detectGame(G301.replace('→ quedan 7', '→ BULLSEYE!'))?.parsed).toMatchObject({ value: 0, grid: '🎯💥🎯💥💥' });
+    // English header and wording, too.
+    const en = '301 · Day #33\nCountries by fertility rate\n🎯💥🎯💥💥 → 7 left\n301juegodiario.com';
+    expect(detectGame(en)?.parsed).toMatchObject({ value: 7, puzzleNumber: 33, note: 'Countries by fertility rate' });
+    expect(detectGame(en.replace('→ 7 left', '→ BULLSEYE!'))?.parsed).toMatchObject({ value: 0 });
+  });
+
+  it('301: a category that mentions "diana" is not a bullseye', () => {
+    const text = '301 · Día #40\nPalabras con diana\n🎯💥 → quedan 120\n301juegodiario.com';
+    expect(detectGame(text)?.parsed).toMatchObject({ value: 120, note: 'Palabras con diana' });
+  });
+
   it('Pop: 3 of 5, *POP* shown as 💥, difficulty in the note', () => {
     expect(detectGame(POP)).toEqual({
       gameId: 'pop-301',
