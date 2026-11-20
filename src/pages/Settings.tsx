@@ -1,11 +1,14 @@
-import { valueLabelKey } from '../lib/format';
+import { valueLabel } from '../lib/format';
 import { useRef, useState, type FormEvent, type ReactNode } from 'react';
+import GameEditor from '../components/GameEditor';
+import { decodeGameCode } from '../lib/shareCode';
 import { useTranslation } from 'react-i18next';
 import {
-  addCustomGame,
   deleteCustomGame,
   exportBackup,
   importBackup,
+  importGame,
+  loadGames,
   saveGamePrefs,
   useAllGames,
   validateBackup,
@@ -14,7 +17,7 @@ import {
 } from '../db';
 import { localDate } from '../lib/date';
 import { setThemePref, useTheme, type ThemePref } from '../lib/theme';
-import type { Game, ResultKind } from '../types';
+import type { Game } from '../types';
 
 const btn =
   'rounded-md border border-stone-300 px-3 py-1.5 text-sm hover:bg-stone-100 disabled:opacity-40 dark:border-stone-700 dark:hover:bg-stone-800';
@@ -32,10 +35,15 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
 
 export default function Settings() {
   const { t } = useTranslation();
+  // undefined = closed, null = new game, Game = editing that game.
+  const [editing, setEditing] = useState<Game | null | undefined>(undefined);
   return (
     <div className="flex flex-col gap-6">
-      <GamesSection />
-      <AddGameSection />
+      <GamesSection onEdit={setEditing} />
+      <AddGameSection onNew={() => setEditing(null)} />
+      {editing !== undefined && (
+        <GameEditor key={editing?.id ?? 'new'} game={editing} onClose={() => setEditing(undefined)} />
+      )}
       <Section title={t('settings.appearance')}>
         <AppearanceFields />
       </Section>
@@ -46,7 +54,7 @@ export default function Settings() {
 
 // ------------------------------------------------------------ games list (FR-25)
 
-function GamesSection() {
+function GamesSection({ onEdit }: { onEdit: (g: Game) => void }) {
   const { t } = useTranslation();
   const entries = useAllGames();
   if (!entries) return null;
@@ -86,8 +94,24 @@ function GamesSection() {
                   {t('settings.custom')}
                 </span>
               )}
+              {e.edited && (
+                <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-xs text-amber-800 dark:bg-amber-900/50 dark:text-amber-200">
+                  {t('settings.edited')}
+                </span>
+              )}
+              {e.game.pattern && (
+                <span
+                  title={t('settings.taughtHelp')}
+                  className="ml-2 rounded bg-emerald-100 px-1.5 py-0.5 text-xs text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-200"
+                >
+                  🎓 {t('settings.taught')}
+                </span>
+              )}
             </span>
-            <span className="text-xs text-stone-500">{t(valueLabelKey(e.game))}</span>
+            <span className="hidden text-xs text-stone-500 sm:inline">{valueLabel(e.game, t)}</span>
+            <button className={btn} onClick={() => onEdit(e.game)} aria-label={t('settings.editGame', { game: e.game.name })}>
+              ✎
+            </button>
             <button
               className={btn}
               onClick={() => move(i, -1)}
@@ -124,128 +148,59 @@ function GamesSection() {
 
 // ------------------------------------------------------------ add a game
 
-const KINDS: ResultKind[] = ['score', 'guesses', 'mistakes', 'hints', 'solved', 'generic'];
-
-function slug(name: string): string {
-  const base = name
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-|-$/g, '');
-  return `custom-${base || 'game'}-${Date.now().toString(36)}`;
-}
-
-function AddGameSection() {
+function AddGameSection({ onNew }: { onNew: () => void }) {
   const { t } = useTranslation();
-  const [name, setName] = useState('');
-  const [url, setUrl] = useState('');
-  const [icon, setIcon] = useState('');
-  const [kind, setKind] = useState<ResultKind>('score');
-  const [max, setMax] = useState('');
-  const [winLoss, setWinLoss] = useState(false);
-  const [lang, setLang] = useState<'en' | 'es'>('en');
+  const [code, setCode] = useState('');
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
-  async function onSubmit(e: FormEvent) {
+  async function onImport(e: FormEvent) {
     e.preventDefault();
-    let parsed: URL;
+    let game: Game;
     try {
-      parsed = new URL(url.trim());
-      if (!/^https?:$/.test(parsed.protocol)) throw new Error();
+      game = decodeGameCode(code);
     } catch {
-      return setMsg({ ok: false, text: t('settings.errUrl') });
+      return setMsg({ ok: false, text: t('settings.badCode') });
     }
-    const maxValue = max.trim() ? Number(max) : undefined;
-    if (maxValue !== undefined && (!Number.isInteger(maxValue) || maxValue < 1)) {
-      return setMsg({ ok: false, text: t('settings.errMax') });
-    }
-    const game: Game = {
-      id: slug(name),
-      name: name.trim(),
-      url: parsed.href,
-      lang,
-      resultKind: kind,
-      // Win/loss follows the result type, except for "generic" where the user decides.
-      hasWinLoss: kind === 'generic' ? winLoss : kind === 'guesses' || kind === 'mistakes' || kind === 'solved',
-      maxValue,
-      tags: [],
-      icon: icon.trim() || '🎮',
-      custom: true,
-    };
-    await addCustomGame(game);
-    setMsg({ ok: true, text: t('settings.added', { game: game.name }) });
-    setName('');
-    setUrl('');
-    setIcon('');
-    setMax('');
+    const existing = (await loadGames()).find((x) => x.game.id === game.id);
+    if (existing && !confirm(t('settings.confirmReplaceGame', { game: existing.game.name }))) return;
+    const how = await importGame(game);
+    setCode('');
+    setMsg({ ok: true, text: t(how === 'added' ? 'settings.codeAdded' : 'settings.codeUpdated', { game: game.name }) });
   }
 
   return (
     <Section title={t('settings.addGame')}>
-      <form onSubmit={onSubmit} className="grid gap-3 sm:grid-cols-2">
-        <label className="flex flex-col gap-1 text-sm">
-          {t('settings.name')}
-          <input required value={name} onChange={(e) => setName(e.target.value)} className={input} />
-        </label>
-        <label className="flex flex-col gap-1 text-sm">
-          URL
-          <input
-            required
-            type="url"
-            placeholder="https://"
-            value={url}
-            onChange={(e) => setUrl(e.target.value)}
-            className={input}
-          />
-        </label>
-        <label className="flex flex-col gap-1 text-sm">
-          {t('settings.resultType')}
-          <select value={kind} onChange={(e) => setKind(e.target.value as ResultKind)} className={input}>
-            {KINDS.map((k) => (
-              <option key={k} value={k}>
-                {t(`settings.kind.${k}`)}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="flex flex-col gap-1 text-sm">
-          {t('settings.maxValue')}
-          <input type="number" min={1} value={max} onChange={(e) => setMax(e.target.value)} className={input} />
-        </label>
-        <label className="flex flex-col gap-1 text-sm">
-          {t('settings.icon')}
-          <input value={icon} onChange={(e) => setIcon(e.target.value)} placeholder="🎮" maxLength={8} className={input} />
-        </label>
-        <label className="flex flex-col gap-1 text-sm">
-          {t('settings.gameLang')}
-          <select value={lang} onChange={(e) => setLang(e.target.value as 'en' | 'es')} className={input}>
-            <option value="en">English</option>
-            <option value="es">Español</option>
-          </select>
-        </label>
-        {kind === 'generic' && (
-          <label className="flex items-center gap-2 text-sm sm:col-span-2">
-            <input
-              type="checkbox"
-              checked={winLoss}
-              onChange={(e) => setWinLoss(e.target.checked)}
-              className="h-4 w-4 accent-emerald-600"
-            />
-            {t('settings.hasWinLoss')}
-          </label>
-        )}
-        <div className="flex items-center gap-3 sm:col-span-2">
-          <button type="submit" className="rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700">
-            {t('settings.addButton')}
+      <div className="flex flex-col gap-4">
+        <div>
+          <button onClick={onNew} className="rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700">
+            + {t('settings.newGame')}
           </button>
-          {msg && (
-            <p className={`text-sm ${msg.ok ? 'text-emerald-700 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
-              {msg.text}
-            </p>
-          )}
+          <p className="mt-2 text-sm text-stone-500">{t('settings.newGameHelp')}</p>
         </div>
-      </form>
+        <form onSubmit={onImport} className="flex flex-col gap-2">
+          <label htmlFor="setup-code" className="text-sm font-medium">
+            {t('settings.importCode')}
+          </label>
+          <div className="flex gap-2">
+            <input
+              id="setup-code"
+              value={code}
+              onChange={(e) => setCode(e.target.value)}
+              placeholder="DGH1.…"
+              className={`${input} min-w-0 flex-1 font-mono text-xs`}
+            />
+            <button type="submit" disabled={!code.trim()} className={btn}>
+              {t('settings.importCodeButton')}
+            </button>
+          </div>
+          <p className="text-xs text-stone-500">{t('settings.importCodeHelp')}</p>
+        </form>
+        {msg && (
+          <p className={`text-sm ${msg.ok ? 'text-emerald-700 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
+            {msg.text}
+          </p>
+        )}
+      </div>
     </Section>
   );
 }

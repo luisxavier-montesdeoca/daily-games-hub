@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useDialogClose } from '../lib/dialog';
 import { useTranslation } from 'react-i18next';
 import { toBlob } from 'html-to-image';
 import { useAllResults } from '../db';
@@ -24,6 +25,7 @@ const btn =
 export default function ShareDialog({ date, games, results, onClose }: Props) {
   const { t, i18n } = useTranslation();
   const dialogRef = useRef<HTMLDialogElement>(null);
+  const { finish, close } = useDialogClose(dialogRef, onClose);
   const cardRef = useRef<HTMLDivElement>(null);
   const allResults = useAllResults();
 
@@ -126,7 +128,7 @@ export default function ShareDialog({ date, games, results, onClose }: Props) {
   return (
     <dialog
       ref={dialogRef}
-      onClose={onClose}
+      onClose={finish}
       className="m-auto w-[min(56rem,calc(100vw-2rem))] rounded-xl bg-white p-0 text-stone-900 shadow-xl dark:bg-stone-900 dark:text-stone-100"
     >
       <div className="flex flex-col gap-5 p-5 md:flex-row">
@@ -199,7 +201,7 @@ export default function ShareDialog({ date, games, results, onClose }: Props) {
             <button onClick={copyText} disabled={busy || items.length === 0} className={btn}>
               {t('share.copyText')}
             </button>
-            <button onClick={() => dialogRef.current?.close()} className={`${btn} ml-auto`}>
+            <button onClick={close} className={`${btn} ml-auto`}>
               {t('share.close')}
             </button>
           </div>

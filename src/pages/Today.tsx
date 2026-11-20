@@ -6,6 +6,7 @@ import GameCard from '../components/GameCard';
 import ResultDialog from '../components/ResultDialog';
 import PasteBox from '../components/PasteBox';
 import ShareDialog from '../components/ShareDialog';
+import GameEditor from '../components/GameEditor';
 import type { Game } from '../types';
 
 export default function Today() {
@@ -16,6 +17,8 @@ export default function Today() {
   const [editing, setEditing] = useState<{ game: Game; raw?: string } | null>(null);
   const [popupsBlocked, setPopupsBlocked] = useState(false);
   const [sharing, setSharing] = useState(false);
+  // Teaching a game its share-text format, from a pasted example.
+  const [teaching, setTeaching] = useState<{ game: Game; sample: string } | null>(null);
 
   if (!games || !results) return <p className="text-stone-500">{t('today.loading')}</p>;
 
@@ -81,7 +84,7 @@ export default function Today() {
         </p>
       )}
 
-      <PasteBox onDetected={(game, raw) => setEditing({ game, raw })} />
+      <PasteBox onDetected={(game, raw) => setEditing({ game, raw })} onTeach={(game, sample) => setTeaching({ game, sample })} />
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {games.map((g) => (
@@ -98,6 +101,22 @@ export default function Today() {
           existing={results[editing.game.id]}
           initialRaw={editing.raw}
           onClose={() => setEditing(null)}
+          onTeach={(sample) => {
+            const game = editing.game;
+            setEditing(null);
+            setTeaching({ game, sample });
+          }}
+        />
+      )}
+
+      {teaching && (
+        <GameEditor
+          key={`${teaching.game.id}:${teaching.sample}`}
+          game={teaching.game}
+          initialSample={teaching.sample}
+          onClose={() => setTeaching(null)}
+          // Taught: now log today's result from the same text.
+          onSaved={(game) => setEditing({ game, raw: teaching.sample })}
         />
       )}
 

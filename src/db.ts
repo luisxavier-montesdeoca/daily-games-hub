@@ -8,7 +8,11 @@ export const db = new Dexie('daily-games-hub') as Dexie & {
   prefs: EntityTable<GamePref, 'gameId'>;
   customGames: EntityTable<Game, 'id'>;
   dismissed: EntityTable<Dismissed, 'id'>;
+  overrides: EntityTable<GameOverride, 'gameId'>;
 };
+
+/** A built-in game as edited by the user (result type, unit, taught share text…). Replaces the catalog entry. */
+export type GameOverride = { gameId: string; game: Game };
 
 /** A Discover suggestion the user said "not interested" to. */
 export type Dismissed = { id: string; at: number };
@@ -30,6 +34,14 @@ db.version(3).stores({
   prefs: 'gameId',
   customGames: 'id',
   dismissed: 'id',
+});
+// v4: user edits to built-in games.
+db.version(4).stores({
+  results: 'id, gameId, date, [gameId+date]',
+  prefs: 'gameId',
+  customGames: 'id',
+  dismissed: 'id',
+  overrides: 'gameId',
 });
 
 export function useDismissed(): Set<string> | undefined {
@@ -76,16 +88,35 @@ export function useResultsBetween(from: string, to: string): Result[] | undefine
 
 // ---------------------------------------------------------------- games
 
-export type GameEntry = { game: Game; enabled: boolean; order: number };
+export type GameEntry = {
+  game: Game;
+  enabled: boolean;
+  order: number;
+  /** A built-in game the user has edited (can be reset). */
+  edited: boolean;
+};
 
-/** Every game (built-in + custom) with its prefs, in display order. */
+export const isBuiltIn = (id: string) => CATALOG.some((g) => g.id === id);
+
+/** Every game (built-in, with the user's edits, + custom) with its prefs, in display order. */
 export async function loadGames(): Promise<GameEntry[]> {
-  const [prefs, custom] = await Promise.all([db.prefs.toArray(), db.customGames.toArray()]);
+  const [prefs, custom, overrides] = await Promise.all([
+    db.prefs.toArray(),
+    db.customGames.toArray(),
+    db.overrides.toArray(),
+  ]);
   const byId = new Map(prefs.map((p) => [p.gameId, p]));
+  const edits = new Map(overrides.map((o) => [o.gameId, o.game]));
   return [...CATALOG, ...custom]
     .map((game, i) => {
       const p = byId.get(game.id);
-      return { game, enabled: p?.enabled ?? true, order: p?.order ?? i };
+      const edit = edits.get(game.id);
+      return {
+        game: edit ? { ...edit, id: game.id, custom: game.custom } : game,
+        enabled: p?.enabled ?? true,
+        order: p?.order ?? i,
+        edited: !!edit && !game.custom,
+      };
     })
     .sort((a, b) => a.order - b.order);
 }
@@ -105,11 +136,35 @@ export async function saveGamePrefs(entries: { id: string; enabled: boolean }[])
 }
 
 export async function addCustomGame(game: Game): Promise<void> {
-  await db.transaction('rw', db.customGames, db.prefs, async () => {
+  // loadGames() also reads overrides, so it must be in the transaction's scope.
+  await db.transaction('rw', [db.customGames, db.prefs, db.overrides], async () => {
     await db.customGames.add({ ...game, custom: true });
     const count = (await loadGames()).length;
     await db.prefs.put({ gameId: game.id, enabled: true, order: count });
   });
+}
+
+/** Save an edited game: built-in games are stored as an override, added games are updated in place. */
+export async function saveGame(game: Game): Promise<void> {
+  if (isBuiltIn(game.id)) {
+    const { custom: _drop, ...rest } = game;
+    await db.overrides.put({ gameId: game.id, game: rest });
+  } else {
+    await db.customGames.put({ ...game, custom: true });
+  }
+}
+
+/** Undo all edits to a built-in game. Results are kept. */
+export const resetGame = (id: string) => db.overrides.delete(id);
+
+/** Add or replace a game from a setup code. Returns whether it replaced an existing game. */
+export async function importGame(game: Game): Promise<'added' | 'updated'> {
+  if (isBuiltIn(game.id) || (await db.customGames.get(game.id))) {
+    await saveGame(game);
+    return 'updated';
+  }
+  await addCustomGame(game);
+  return 'added';
 }
 
 /** Remove a custom game and all of its results. */
@@ -135,14 +190,17 @@ export type Backup = {
   customGames: Game[];
   /** Added in M5; optional so older backups still import. */
   dismissed?: Dismissed[];
+  /** Edits to built-in games; optional so older backups still import. */
+  overrides?: GameOverride[];
 };
 
 export async function exportBackup(): Promise<Backup> {
-  const [results, prefs, customGames, dismissed] = await Promise.all([
+  const [results, prefs, customGames, dismissed, overrides] = await Promise.all([
     db.results.toArray(),
     db.prefs.toArray(),
     db.customGames.toArray(),
     db.dismissed.toArray(),
+    db.overrides.toArray(),
   ]);
   return {
     app: BACKUP_APP,
@@ -152,6 +210,7 @@ export async function exportBackup(): Promise<Backup> {
     prefs,
     customGames,
     dismissed,
+    overrides,
   };
 }
 
@@ -167,7 +226,14 @@ export function validateBackup(data: unknown): Backup {
     if (typeof r?.gameId !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(r?.date ?? '')) throw new Error('badRow');
   }
   if (d.dismissed !== undefined && !Array.isArray(d.dismissed)) throw new Error('notBackup');
-  return { ...d, prefs: d.prefs ?? [], customGames: d.customGames ?? [], dismissed: d.dismissed ?? [] } as Backup;
+  if (d.overrides !== undefined && !Array.isArray(d.overrides)) throw new Error('notBackup');
+  return {
+    ...d,
+    prefs: d.prefs ?? [],
+    customGames: d.customGames ?? [],
+    dismissed: d.dismissed ?? [],
+    overrides: d.overrides ?? [],
+  } as Backup;
 }
 
 /**
@@ -178,9 +244,17 @@ export function validateBackup(data: unknown): Backup {
  */
 export async function importBackup(b: Backup, mode: 'merge' | 'replace'): Promise<number> {
   const dismissed = b.dismissed ?? [];
-  return db.transaction('rw', [db.results, db.prefs, db.customGames, db.dismissed], async () => {
+  const overrides = b.overrides ?? [];
+  return db.transaction('rw', [db.results, db.prefs, db.customGames, db.dismissed, db.overrides], async () => {
     if (mode === 'replace') {
-      await Promise.all([db.results.clear(), db.prefs.clear(), db.customGames.clear(), db.dismissed.clear()]);
+      await Promise.all([
+        db.results.clear(),
+        db.prefs.clear(),
+        db.customGames.clear(),
+        db.dismissed.clear(),
+        db.overrides.clear(),
+      ]);
+      await db.overrides.bulkPut(overrides);
       await db.results.bulkPut(b.results.map((r) => ({ ...r, id: resultId(r.gameId, r.date) })));
       await db.prefs.bulkPut(b.prefs);
       await db.customGames.bulkPut(b.customGames);
@@ -199,6 +273,7 @@ export async function importBackup(b: Backup, mode: 'merge' | 'replace'): Promis
     }
     for (const g of b.customGames) if (!(await db.customGames.get(g.id))) await db.customGames.put(g);
     for (const p of b.prefs) if (!(await db.prefs.get(p.gameId))) await db.prefs.put(p);
+    for (const o of overrides) if (!(await db.overrides.get(o.gameId))) await db.overrides.put(o);
     return written;
   });
 }

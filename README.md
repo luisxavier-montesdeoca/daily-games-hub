@@ -23,6 +23,25 @@ One-time setup on github.com: **Settings → Pages → Build and deployment → 
 Note: the online site and `localhost:5173` are different sites, so they have separate data.
 To move your results, use **Settings → Export backup** on one and **Import backup** on the other.
 
+## Teaching the app a game
+
+Every game, built-in or added, can be edited with **✎** in Settings:
+
+- **How results are measured:** result type, maximum, unit (`$`, `km`…, before or after the number),
+  decimals, and **lower is better** (e.g. Costcodle's "$ off", 301's "points left").
+- **Share text:** paste one example, pick what the score is (a number you click, how many times an
+  emoji appears, or the number of grid lines), click the puzzle number, and optionally set
+  "it's a loss when the text contains …". The preview shows how it reads; a second box checks
+  another day's text. A taught format takes priority over a built-in reader; **Reset to default**
+  undoes edits to a built-in game.
+- Unrecognized pastes on Today offer **Teach it**, and the result dialog has a 🎓 link, so teaching
+  usually starts from a real paste.
+- **Copy setup code** shares a game's settings (never results). Friends paste it under
+  Settings → Add a game.
+
+Taught formats are stored as data (the word before/after each number), not as regexes, so setup
+codes from other people can't run code. See `src/lib/pattern.ts` and `src/lib/shareCode.ts`.
+
 ## Develop
 
 ```bash
@@ -38,8 +57,11 @@ src/
   games/catalog.ts     game list: add a game here
   games/parsers/       share-text parsers, one per game; real pasted samples in realSamples.test.ts
   games/discover.ts    hand-picked games for the Discover page (edit to add/remove)
+  games/parsers/forGame.ts  picks a game's reader: taught format first, then built-in
+  lib/pattern.ts       teach-by-example share-text reader (+ pattern.test.ts)
+  lib/shareCode.ts     game setup codes (encode / validated decode)
   lib/similar.ts       "similar to your games" ranking (+ similar.test.ts)
-  db.ts                IndexedDB (Dexie): results + prefs, React hooks
+  db.ts                IndexedDB (Dexie): results, prefs, added games, edits to built-ins, React hooks
   types.ts             Game / Result types
   lib/date.ts          local-date helpers, useToday() (rolls over at midnight)
   lib/format.ts        result → short text ("3/6", "540 pts")
@@ -48,7 +70,7 @@ src/
   lib/stats.ts         streaks, win rate, distributions (+ stats.test.ts)
   lib/theme.ts         system / light / dark theme
   pages/               Today, Stats, History, Discover, Settings
-  components/          GameCard, ResultDialog, PasteBox, ShareDialog, ShareCard, …
+  components/          GameCard, ResultDialog, GameEditor, PasteBox, ShareDialog, ShareCard, …
 ```
 
 Data lives in your browser's IndexedDB for `localhost:5173`, and only there (the dev server on 5174 has its own, separate data).

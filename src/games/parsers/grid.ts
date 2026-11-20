@@ -30,7 +30,8 @@ export function parseNumber(s: string): number | undefined {
   return s && Number.isFinite(n) ? n : undefined;
 }
 
-const EMOJI_ONLY = /^(?:\p{Extended_Pictographic}|\p{Emoji_Modifier}|‍|️)+$/u;
+// Keycaps (6️⃣) and flags (🇪🇸) count too; variation selectors are already stripped.
+const EMOJI_ONLY = /^(?:\p{Extended_Pictographic}|\p{Emoji_Modifier}|\p{Regional_Indicator}|[0-9#*]⃣|‍|️)+$/u;
 
 /**
  * Lines made only of emoji (any emoji, not just squares), e.g. ⚪⚪🟡🟣 or 🦑🐟🫧.

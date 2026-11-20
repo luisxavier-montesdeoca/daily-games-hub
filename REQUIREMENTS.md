@@ -93,6 +93,12 @@ One local web page, opened in a desktop browser, that:
 - **FR-27** Light and dark theme.
 - **FR-28** **Language: English and Spanish.** All UI text comes from translation files. A toggle switches the language, and the app remembers my choice. Game names stay as they are.
 
+### 4.7 Game editor and teaching share texts
+- **FR-29** Any game (built-in or added) can be edited in the app: name, URL, icon, language, result type, maximum, unit (before/after the number), decimals, and "lower is better" for score games. Edits to built-in games can be reset to the default. Existing results keep their saved values.
+- **FR-30** **Teach by example:** paste one share text, then mark what the score is (a number in the text, the count of an emoji, or the number of grid lines) and which number is the puzzle number. Optionally, "it's a loss/revealed when the text contains …". A live preview shows how the example (and an optional second text) is read. A taught format takes priority over a built-in parser.
+- **FR-31** Teaching starts from a real paste: an unrecognized paste on Today offers "Teach it" with a game picker, and the result dialog links to the editor. After saving, the result is logged from the same text.
+- **FR-32** **Setup codes:** a game's settings (never results) can be copied as a code and added by someone else in Settings. Codes are validated field by field; taught formats are stored as data (literal neighbouring words), not as regexes or code.
+
 ## 5. Non-functional requirements
 
 - **NFR-1** Runs locally on a fixed port: the built app on 5173 (served in the background from login), development on 5174, both strict. No external server or database.

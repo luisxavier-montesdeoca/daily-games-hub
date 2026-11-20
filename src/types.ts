@@ -31,6 +31,50 @@ export type Game = {
   icon: string;
   /** Added by the user in Settings (stored in IndexedDB, not in catalog.ts). */
   custom?: boolean;
+  /** Score games: unit shown next to the value, e.g. "$", "km", "pts". Overrides `unit`. */
+  unitLabel?: string;
+  /** Show the unit before the number ("$12.34") instead of after ("140 km"). */
+  unitPrefix?: boolean;
+  /** Decimal places allowed in the value (0 = whole numbers). */
+  decimals?: number;
+  /** Share-text format taught in the app. Takes priority over a built-in parser. */
+  pattern?: SharePattern;
+};
+
+/**
+ * Where a number sits in a share text, described by what's right before and after it.
+ * Stored as data (never as a regex) so imported game setups can't inject code.
+ */
+export type Anchor =
+  | { kind: 'text'; text: string } // a literal word/punctuation, e.g. "Score:" or "/"
+  | { kind: 'edge' } // start or end of the line
+  | { kind: 'emoji' } // any emoji
+  | { kind: 'number' }; // another number
+
+export type NumberSlot = {
+  before: Anchor;
+  after: Anchor;
+  /** Which match to take when the anchors match several times (0 = first). */
+  occurrence: number;
+};
+
+export type ScoreSource =
+  | { from: 'number'; slot: NumberSlot }
+  | { from: 'emojiCount'; emoji: string } // e.g. count 💡 for hints
+  | { from: 'gridRows' }; // e.g. guesses = rows in a Wordle grid
+
+/** A share-text format learned from one example (see lib/pattern.ts). */
+export type SharePattern = {
+  /** Text a line starts with that identifies the game, e.g. "Minute Cryptic". Case-insensitive. */
+  detect: string;
+  score?: ScoreSource;
+  puzzle?: NumberSlot;
+  /** If the text contains this, the result is a loss (or "revealed"). Case-insensitive. */
+  lossIf?: string;
+  /** Keep emoji-only lines as the result grid. */
+  grid: boolean;
+  /** The example it was taught with (shown again when editing). */
+  sample: string;
 };
 
 export type Outcome = 'win' | 'loss' | 'n/a';

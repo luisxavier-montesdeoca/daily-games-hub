@@ -1,9 +1,10 @@
-import { valueLabelKey } from '../lib/format';
+import { valueLabel } from '../lib/format';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useDialogClose } from '../lib/dialog';
 import { useTranslation } from 'react-i18next';
-import { db, deleteResult, resultId, saveResult } from '../db';
-import { GAMES_BY_ID } from '../games/catalog';
-import { detectGame, PARSER_BY_GAME, type Parsed } from '../games/parsers';
+import { db, deleteResult, resultId, saveResult, useAllGames } from '../db';
+import type { Parsed } from '../games/parsers';
+import { detectAmong, parserFor } from '../games/parsers/forGame';
 import type { Game, Outcome, Result } from '../types';
 
 type Props = {
@@ -14,6 +15,8 @@ type Props = {
   /** Share text to read on open (from the paste-anything box). */
   initialRaw?: string;
   onClose: () => void;
+  /** Open the game editor to teach the app this share text's format. */
+  onTeach?: (sample: string) => void;
 };
 
 /** Status of reading the pasted share text. */
@@ -39,9 +42,11 @@ function valueRules(game: Game, outcome: Outcome) {
 const input =
   'w-full rounded-md border border-stone-300 bg-white px-3 py-2 dark:border-stone-700 dark:bg-stone-950';
 
-export default function ResultDialog({ game, date: initialDate, existing, initialRaw, onClose }: Props) {
+export default function ResultDialog({ game, date: initialDate, existing, initialRaw, onClose, onTeach }: Props) {
   const { t } = useTranslation();
+  const allGames = useAllGames();
   const ref = useRef<HTMLDialogElement>(null);
+  const { finish, close } = useDialogClose(ref, onClose);
 
   const [date, setDate] = useState(existing?.date ?? initialDate);
   const [outcome, setOutcome] = useState<Outcome>(existing?.outcome ?? (game.hasWinLoss ? 'win' : 'n/a'));
@@ -54,7 +59,8 @@ export default function ResultDialog({ game, date: initialDate, existing, initia
   const [error, setError] = useState<string | null>(null);
   const [isEdit, setIsEdit] = useState(!!existing);
 
-  const parser = PARSER_BY_GAME[game.id];
+  const parser = parserFor(game);
+  const decimals = game.resultKind === 'score' ? (game.decimals ?? 0) : 0;
 
   function applyParsed(p: Parsed) {
     setOutcome(p.outcome);
@@ -77,9 +83,9 @@ export default function ResultDialog({ game, date: initialDate, existing, initia
       }
       return setParseStatus({ kind: 'fail' });
     }
-    const other = detectGame(text);
-    if (other && other.gameId !== game.id) {
-      return setParseStatus({ kind: 'otherGame', name: GAMES_BY_ID[other.gameId]?.name ?? other.gameId });
+    const other = detectAmong(text, allGames?.map((e) => e.game) ?? []);
+    if (other && other.game.id !== game.id) {
+      return setParseStatus({ kind: 'otherGame', name: other.game.name });
     }
     setParseStatus(parser ? { kind: 'fail' } : null);
   }
@@ -129,12 +135,14 @@ export default function ResultDialog({ game, date: initialDate, existing, initia
       }
       return undefined;
     }
-    const n = Number(s);
-    if (!Number.isInteger(n) || n < rules.min || (rules.max !== undefined && n > rules.max)) {
+    const n = Number(s.replace(',', '.'));
+    const places = (s.split(/[.,]/)[1] ?? '').length;
+    if (!Number.isFinite(n) || places > decimals || n < rules.min || (rules.max !== undefined && n > rules.max)) {
+      const key = decimals ? 'Dec' : '';
       setError(
         rules.max !== undefined
-          ? t('dialog.errRange', { min: rules.min, max: rules.max })
-          : t('dialog.errMin', { min: rules.min }),
+          ? t(`dialog.errRange${key}`, { min: rules.min, max: rules.max, decimals })
+          : t(`dialog.errMin${key}`, { min: rules.min, decimals }),
       );
       return 'invalid';
     }
@@ -159,19 +167,19 @@ export default function ResultDialog({ game, date: initialDate, existing, initia
     });
     // If an existing result was moved to another date, remove the old one.
     if (existing && existing.date !== date) await deleteResult(game.id, existing.date);
-    onClose();
+    close();
   }
 
   async function onDelete() {
     if (!confirm(t('dialog.confirmDelete'))) return;
     await deleteResult(game.id, date);
-    onClose();
+    close();
   }
 
   return (
     <dialog
       ref={ref}
-      onClose={onClose}
+      onClose={finish}
       className="m-auto w-[min(32rem,calc(100vw-2rem))] rounded-xl bg-white p-0 text-stone-900 shadow-xl dark:bg-stone-900 dark:text-stone-100"
     >
       <form onSubmit={onSubmit} className="flex flex-col gap-4 p-5">
@@ -199,6 +207,15 @@ export default function ResultDialog({ game, date: initialDate, existing, initia
           )}
           {parseStatus?.kind === 'fail' && (
             <p className="text-amber-700 dark:text-amber-400">{t('dialog.parseFail')}</p>
+          )}
+          {onTeach && raw.trim() && parseStatus?.kind !== 'ok' && parseStatus?.kind !== 'otherGame' && (
+            <button
+              type="button"
+              onClick={() => onTeach(raw)}
+              className="self-start text-left text-emerald-700 underline hover:text-emerald-900 dark:text-emerald-400 dark:hover:text-emerald-300"
+            >
+              🎓 {t(parser ? 'dialog.reteach' : 'dialog.teach', { game: game.name })}
+            </button>
           )}
           {parseStatus?.kind === 'otherGame' && (
             <p className="text-amber-700 dark:text-amber-400">{t('dialog.parseOtherGame', { game: parseStatus.name })}</p>
@@ -244,11 +261,12 @@ export default function ResultDialog({ game, date: initialDate, existing, initia
         <div className="grid grid-cols-2 gap-3">
           {rules.show && (
             <label className="flex flex-col gap-1 text-sm">
-              {t(valueLabelKey(game))}
+              {valueLabel(game, t)}
               {rules.max !== undefined && <span className="text-xs text-stone-500">{`${rules.min}–${rules.max}`}</span>}
               <input
                 type="number"
-                inputMode="numeric"
+                inputMode={decimals ? 'decimal' : 'numeric'}
+                step={decimals ? 1 / 10 ** decimals : 1}
                 min={rules.min}
                 max={rules.max}
                 value={value}
@@ -291,7 +309,7 @@ export default function ResultDialog({ game, date: initialDate, existing, initia
           <div className="ml-auto flex gap-2">
             <button
               type="button"
-              onClick={() => ref.current?.close()}
+              onClick={close}
               className="rounded-md border border-stone-300 px-4 py-2 text-sm hover:bg-stone-100 dark:border-stone-700 dark:hover:bg-stone-800"
             >
               {t('dialog.cancel')}

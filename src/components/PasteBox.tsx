@@ -1,36 +1,51 @@
 import { useState, type FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
-import { GAMES_BY_ID } from '../games/catalog';
-import { detectGame } from '../games/parsers';
+import { useAllGames } from '../db';
+import { detectAmong } from '../games/parsers/forGame';
 import type { Game } from '../types';
 
 type Props = {
   /** Called with the detected game and the pasted text; the parent opens the result dialog. */
   onDetected: (game: Game, text: string) => void;
+  /** The text wasn't recognized and the user picked which game it is: open the game editor to teach it. */
+  onTeach: (game: Game, text: string) => void;
 };
 
 /** "Paste anything": figures out which game a share text came from (FR-10). */
-export default function PasteBox({ onDetected }: Props) {
+export default function PasteBox({ onDetected, onTeach }: Props) {
   const { t } = useTranslation();
+  const entries = useAllGames();
   const [text, setText] = useState('');
   const [notRecognized, setNotRecognized] = useState(false);
+  const [teachId, setTeachId] = useState('');
+
+  const games = entries?.map((e) => e.game) ?? [];
+  const enabled = entries?.filter((e) => e.enabled).map((e) => e.game) ?? [];
 
   function submit(value: string) {
     if (!value.trim()) return;
-    const hit = detectGame(value);
-    const game = hit && GAMES_BY_ID[hit.gameId];
-    if (!game) {
+    const hit = detectAmong(value, games);
+    if (!hit) {
       setNotRecognized(true);
       return;
     }
     setNotRecognized(false);
     setText('');
-    onDetected(game, value);
+    onDetected(hit.game, value);
   }
 
   function onSubmit(e: FormEvent) {
     e.preventDefault();
     submit(text);
+  }
+
+  function teach() {
+    const game = games.find((g) => g.id === teachId);
+    if (!game) return;
+    onTeach(game, text);
+    setText('');
+    setTeachId('');
+    setNotRecognized(false);
   }
 
   return (
@@ -42,7 +57,7 @@ export default function PasteBox({ onDetected }: Props) {
         <textarea
           id="paste-anything"
           value={text}
-          rows={1}
+          rows={notRecognized ? 4 : 1}
           onChange={(e) => {
             setText(e.target.value);
             setNotRecognized(false);
@@ -66,9 +81,34 @@ export default function PasteBox({ onDetected }: Props) {
           {t('paste.submit')}
         </button>
       </div>
-      <p className={`text-xs ${notRecognized ? 'text-amber-700 dark:text-amber-400' : 'text-stone-500'}`}>
-        {notRecognized ? t('paste.notRecognized') : t('paste.help')}
-      </p>
+      {notRecognized ? (
+        <div className="flex flex-wrap items-center gap-2 rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:bg-amber-900/30 dark:text-amber-200">
+          <span>{t('paste.notRecognized')}</span>
+          <select
+            value={teachId}
+            onChange={(e) => setTeachId(e.target.value)}
+            aria-label={t('paste.whichGame')}
+            className="rounded-md border border-amber-300 bg-white px-2 py-1 text-stone-900 dark:border-amber-700 dark:bg-stone-900 dark:text-stone-100"
+          >
+            <option value="">{t('paste.whichGame')}</option>
+            {enabled.map((g) => (
+              <option key={g.id} value={g.id}>
+                {g.icon} {g.name}
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            onClick={teach}
+            disabled={!teachId}
+            className="rounded-md bg-amber-600 px-3 py-1 font-medium text-white hover:bg-amber-700 disabled:opacity-40"
+          >
+            {t('paste.teach')}
+          </button>
+        </div>
+      ) : (
+        <p className="text-xs text-stone-500">{t('paste.help')}</p>
+      )}
     </form>
   );
 }

@@ -6,11 +6,11 @@ import { allGamesStats, computeGameStats, distribution, type GameStats } from '.
 import StatTile from '../components/StatTile';
 import DistributionChart from '../components/DistributionChart';
 import type { Game } from '../types';
-import { valueLabelKey } from '../lib/format';
+import { valueLabel } from '../lib/format';
 
 function fmtNum(n: number | undefined, game: Game, lang: string): string {
   if (n === undefined) return '–';
-  const digits = game.resultKind === 'score' ? 0 : 1;
+  const digits = game.resultKind === 'score' ? (game.decimals ?? 0) : 1;
   return n.toLocaleString(lang, { maximumFractionDigits: digits });
 }
 
@@ -162,12 +162,12 @@ function GameDetail({ game, stats, todayResultBucket }: { game: Game; stats: Gam
                 sub={t('stats.bestN', { n: stats.bestWinStreak })}
               />
             )}
-            <StatTile label={t('stats.average')} value={fmtNum(stats.average, game, lang)} sub={t(valueLabelKey(game))} />
-            <StatTile label={t('stats.best')} value={fmtNum(stats.best, game, lang)} sub={t(valueLabelKey(game))} />
+            <StatTile label={t('stats.average')} value={fmtNum(stats.average, game, lang)} sub={valueLabel(game, t)} />
+            <StatTile label={t('stats.best')} value={fmtNum(stats.best, game, lang)} sub={valueLabel(game, t)} />
           </div>
           <DistributionChart
             buckets={stats.distribution}
-            labelTitle={t('stats.distributionOf', { what: t(valueLabelKey(game)) })}
+            labelTitle={t('stats.distributionOf', { what: valueLabel(game, t) })}
             highlight={todayResultBucket}
           />
         </div>

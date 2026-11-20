@@ -80,19 +80,26 @@ function scoreBuckets(values: number[], maxValue?: number): Bucket[] {
   const lo = maxValue !== undefined ? 0 : Math.min(...values);
   const hi = maxValue ?? Math.max(...values);
   if (lo === hi) return [{ label: String(lo), count: values.length }];
-  // Small ranges (Pop: 0–5) get one bar per value.
-  if (hi - lo <= 10) return range(lo, hi).map((n) => ({ label: String(n), count: values.filter((v) => v === n).length }));
+  // Small whole-number ranges (Pop: 0–5) get one bar per value.
+  if (hi - lo <= 10 && values.every(Number.isInteger)) return range(lo, hi).map((n) => ({ label: String(n), count: values.filter((v) => v === n).length }));
 
   // ~7 buckets with tidy edges: [0–100], [101–200], … (first bucket includes its lower edge).
   const step = niceStep((hi - lo) / 7);
   const buckets: Bucket[] = [];
   let from = Math.floor(lo / step) * step;
   let to = from + step;
+  let prevTop = -Infinity;
   while (true) {
     const top = maxValue !== undefined ? Math.min(to, maxValue) : to;
     const f = from;
-    buckets.push({ label: f === top ? String(f) : `${f}–${top}`, count: values.filter((v) => v >= f && v <= top).length });
+    const below = prevTop;
+    // (previous top, top]: no gaps, so decimal scores like 100.5 land in "101–200".
+    const count = values.filter((v) => (below === -Infinity ? v >= f : v > below) && v <= top).length;
+    // Decimal scores: label from the previous top ("12–14" holds 12.34), so labels have no gaps.
+    const start = below !== -Infinity && !values.every(Number.isInteger) ? below : f;
+    buckets.push({ label: start === top ? String(start) : `${start}–${top}`, count });
     if (top >= hi) break;
+    prevTop = top;
     from = to + 1;
     to += step;
   }

@@ -186,3 +186,22 @@ describe('allGamesStats', () => {
     expect(allGamesStats(['wordle', 'strands'], results, TODAY)).toEqual({ completeDays: 1, current: 1, best: 1 });
   });
 });
+
+describe('decimal, lower-is-better scores (taught games like Costcodle)', () => {
+  const game = {
+    ...GAMES_BY_ID['krillion'],
+    id: 'costcodle',
+    maxValue: undefined,
+    lowerIsBetter: true,
+    decimals: 2,
+  };
+  it('best is the lowest, and every value lands in a bucket', () => {
+    const vals = [3.07, 12.34, 100.5, 7];
+    const s = computeGameStats(game, vals.map((v, i) => r('costcodle', addDays(TODAY, -i), 'n/a', v)), TODAY);
+    expect(s.best).toBe(3.07);
+    expect(s.distribution.reduce((a, b) => a + b.count, 0)).toBe(4);
+    // Labels continue from the previous bucket's top: no gaps for decimals.
+    const labels = s.distribution.map((b) => b.label);
+    for (let i = 1; i < labels.length; i++) expect(labels[i].split('–')[0]).toBe(labels[i - 1].split('–')[1]);
+  });
+});
